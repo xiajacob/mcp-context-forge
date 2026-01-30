@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# pylint: disable=import-outside-toplevel,no-name-in-module
 """Location: ./mcpgateway/services/gateway_service.py
 Copyright 2025
 SPDX-License-Identifier: Apache-2.0
@@ -94,11 +95,8 @@ from mcpgateway.services.http_client_service import get_default_verify, get_http
 from mcpgateway.services.logging_service import LoggingService
 from mcpgateway.services.mcp_session_pool import get_mcp_session_pool, register_gateway_capabilities_for_notifications, TransportType
 from mcpgateway.services.oauth_manager import OAuthManager
-from mcpgateway.services.prompt_service import PromptService
-from mcpgateway.services.resource_service import ResourceService
 from mcpgateway.services.structured_logger import get_structured_logger
 from mcpgateway.services.team_management_service import TeamManagementService
-from mcpgateway.services.tool_service import ToolService
 from mcpgateway.utils.create_slug import slugify
 from mcpgateway.utils.display_name import generate_display_name
 from mcpgateway.utils.pagination import unified_paginate
@@ -380,9 +378,20 @@ class GatewayService:  # pylint: disable=too-many-instance-attributes
         self._active_gateways: Set[str] = set()  # Track active gateway URLs
         self._stream_response = None
         self._pending_responses = {}
-        self.tool_service = ToolService()
-        self.prompt_service = PromptService()
-        self.resource_service = ResourceService()
+        # Prefer using the globally-initialized singletons from mcpgateway.main
+        # (created at application startup). Import lazily to avoid circular
+        # import issues during module import time. Fall back to creating
+        # local instances if the singletons are not available.
+        # Use the globally-exported singletons from the service modules so
+        # events propagate via their initialized EventService/Redis clients.
+        # First-Party
+        from mcpgateway.services.prompt_service import prompt_service
+        from mcpgateway.services.resource_service import resource_service
+        from mcpgateway.services.tool_service import tool_service
+
+        self.tool_service = tool_service
+        self.prompt_service = prompt_service
+        self.resource_service = resource_service
         self._gateway_failure_counts: dict[str, int] = {}
         self.oauth_manager = OAuthManager(request_timeout=int(os.getenv("OAUTH_REQUEST_TIMEOUT", "30")), max_retries=int(os.getenv("OAUTH_MAX_RETRIES", "3")))
         self._event_service = EventService(channel_name="mcpgateway:gateway_events")
@@ -3026,14 +3035,17 @@ class GatewayService:  # pylint: disable=too-many-instance-attributes
                     except Exception as oauth_error:
                         raise GatewayConnectionError(f"Failed to obtain OAuth token for gateway {gateway.name}: {oauth_error}")
                 else:
-                    # Handle non-OAuth authentication (existing logic)
+                    # Handle non-OAuth authentication
                     auth_data = gateway.auth_value or {}
-                    if isinstance(auth_data, str):
-                        headers = decode_auth(auth_data) if auth_data else self._get_auth_headers()
-                    elif isinstance(auth_data, dict):
+                    if isinstance(auth_data, str) and auth_data:
+                        headers = decode_auth(auth_data)
+                    elif isinstance(auth_data, dict) and auth_data:
                         headers = {str(k): str(v) for k, v in auth_data.items()}
                     else:
-                        headers = self._get_auth_headers()
+                        # No auth configured - send request without authentication
+                        # SECURITY: Never send gateway admin credentials to remote servers
+                        logger.warning(f"Gateway {gateway.name} has no authentication configured - sending unauthenticated request")
+                        headers = {"Content-Type": "application/json"}
 
                 # Directly use the persistent HTTP client (no async with)
                 response = await self._http_client.post(urljoin(gateway.url, "/rpc"), json=request, headers=headers)
@@ -4076,31 +4088,28 @@ class GatewayService:  # pylint: disable=too-many-instance-attributes
                 await asyncio.sleep(self._health_check_interval)
 
     def _get_auth_headers(self) -> Dict[str, str]:
-        """Get headers for gateway authentication.
+        """Get default headers for gateway requests (no authentication).
+
+        SECURITY: This method intentionally does NOT include authentication credentials.
+        Each gateway should have its own auth_value configured. Never send this gateway's
+        admin credentials to remote servers.
 
         Returns:
-            dict: Authorization header dict
+            dict: Default headers without authentication
 
         Examples:
             >>> service = GatewayService()
             >>> headers = service._get_auth_headers()
             >>> isinstance(headers, dict)
             True
-            >>> 'Authorization' in headers
-            True
-            >>> 'X-API-Key' in headers
-            True
             >>> 'Content-Type' in headers
             True
             >>> headers['Content-Type']
             'application/json'
-            >>> headers['Authorization'].startswith('Basic ')
+            >>> 'Authorization' not in headers  # No credentials leaked
             True
-            >>> len(headers)
-            3
         """
-        api_key = f"{settings.basic_auth_user}:{settings.basic_auth_password}"
-        return {"Authorization": f"Basic {api_key}", "X-API-Key": api_key, "Content-Type": "application/json"}
+        return {"Content-Type": "application/json"}
 
     async def _notify_gateway_added(self, gateway: DbGateway) -> None:
         """Notify subscribers of gateway addition.
@@ -5263,6 +5272,7 @@ class GatewayService:  # pylint: disable=too-many-instance-attributes
             async with ClientSession(*streams) as session:
                 # Initialize the session
                 response = await session.initialize()
+
                 capabilities = response.capabilities.model_dump(by_alias=True, exclude_none=True)
                 logger.debug(f"Server capabilities: {capabilities}")
 
@@ -5511,3 +5521,28 @@ class GatewayService:  # pylint: disable=too-many-instance-attributes
                 return capabilities, tools, resources, prompts
         sanitized_url = sanitize_url_for_logging(server_url, auth_query_params)
         raise GatewayConnectionError(f"Failed to initialize gateway at {sanitized_url}")
+
+
+# Lazy singleton - created on first access, not at module import time.
+# This avoids instantiation when only exception classes are imported.
+_gateway_service_instance = None  # pylint: disable=invalid-name
+
+
+def __getattr__(name: str):
+    """Module-level __getattr__ for lazy singleton creation.
+
+    Args:
+        name: The attribute name being accessed.
+
+    Returns:
+        The gateway_service singleton instance if name is "gateway_service".
+
+    Raises:
+        AttributeError: If the attribute name is not "gateway_service".
+    """
+    global _gateway_service_instance  # pylint: disable=global-statement
+    if name == "gateway_service":
+        if _gateway_service_instance is None:
+            _gateway_service_instance = GatewayService()
+        return _gateway_service_instance
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
