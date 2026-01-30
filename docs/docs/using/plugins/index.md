@@ -47,11 +47,12 @@ The plugin framework implements a **hybrid architecture** supporting both native
 - **Examples:** `PIIFilterPlugin`, `SearchReplacePlugin`, `DenyListPlugin`
 
 ### External Service Plugins
-- **MCP Integration:** External plugins communicate via MCP using STDIO or Streamable HTTP
+- **Multiple Transports:** External plugins can communicate via MCP (STDIO/HTTP) or high-performance gRPC
 - **Enterprise AI Support:** LlamaGuard, OpenAI Moderation, custom ML models
 - **Independent Scaling:** Services run outside the gateway and can scale separately
 - **Use Cases:** Advanced AI safety, complex ML inference, policy engines (e.g., OPA)
 - **Examples:** OPA external plugin server, LlamaGuard integration, OpenAI Moderation
+- **Performance:** gRPC provides ~8x throughput vs MCP/HTTP (~4,700 vs ~600 calls/sec)
 
 ### Unified Plugin Interface
 
@@ -124,18 +125,28 @@ plugins:
 **External plugin quickstart:**
 
 !!! details "Plugins Lifecycle Guide"
-    See the [plugin lifecycle guide](https://ibm.github.io/mcp-context-forge/using/plugins/lifecycle/) for building, testing, and serving extenal plugins.
+    See the [plugin lifecycle guide](https://ibm.github.io/mcp-context-forge/using/plugins/lifecycle/) for building, testing, and serving external plugins.
 
 ```yaml
 plugins:
-
+  # MCP/HTTP transport (default)
   - name: "MyExternal"
     kind: "external"
     priority: 10
     mcp:
       proto: STREAMABLEHTTP
       url: http://localhost:8000/mcp
+
+  # gRPC transport (high performance - ~8x faster)
+  - name: "MyGrpcPlugin"
+    kind: "external"
+    priority: 10
+    grpc:
+      target: "localhost:50051"
 ```
+
+!!! tip "High-Performance Transport"
+    For performance-critical deployments, consider using [gRPC transport](./grpc-transport.md) which provides ~4,700 calls/sec compared to ~600 calls/sec with MCP/HTTP.
 
 ### Plugin Configuration
 
