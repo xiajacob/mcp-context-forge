@@ -5324,7 +5324,7 @@ def validate_prompt_schema(mapper, connection, target):
             return
 
         try:
-            # FIX: If $schema is missing, default to Draft 2020-12 as per MCP spec.
+            # If $schema is missing, default to Draft 2020-12 as per MCP spec.
             if schema.get("$schema") is None:
                 validator_cls = jsonschema.Draft202012Validator
             else:
