@@ -3903,7 +3903,7 @@ class GatewayService:  # pylint: disable=too-many-instance-attributes
 
             return capabilities, tools, resources, prompts
         except Exception as e:
-            
+
             # MCP SDK uses TaskGroup which wraps exceptions in ExceptionGroup
             root_cause = e
             if isinstance(e, BaseExceptionGroup):
