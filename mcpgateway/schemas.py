@@ -2858,7 +2858,7 @@ class GatewayUpdate(BaseModelWithConfigDict):
     # One time auth - do not store the auth in gateway flag
     one_time_auth: Optional[bool] = Field(default=False, description="The authentication should be used only once and not stored in the gateway")
 
-    tags: Optional[List[str]] = Field(None, description="Tags for categorizing the gateway")
+    tags: Optional[List[Union[str, Dict[str, str]]]] = Field(None, description="Tags for categorizing the gateway")
 
     # Team scoping fields for resource organization
     team_id: Optional[str] = Field(None, description="Team ID this gateway belongs to")
