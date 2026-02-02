@@ -377,6 +377,40 @@ async function parseErrorResponse(response, fallback = "An error occurred") {
 }
 
 /**
+ * Safely parse a JSON response with validation.
+ * Prevents "JSON.parse: unexpected character" errors when server/proxy returns HTML.
+ * @param {Response} response - The fetch Response object
+ * @param {string} fallbackError - Fallback error message if response is not JSON
+ * @returns {Promise<Object>} Parsed JSON result
+ * @throws {Error} If response is not OK or not JSON
+ */
+async function safeParseJsonResponse(
+    response,
+    fallbackError = "Request failed",
+) {
+    const contentType = response.headers.get("content-type") || "";
+
+    // Handle non-OK responses first
+    if (!response.ok) {
+        const errorMsg = await parseErrorResponse(
+            response,
+            `${fallbackError} (HTTP ${response.status})`,
+        );
+        throw new Error(errorMsg);
+    }
+
+    // Validate content-type before parsing
+    if (!contentType.includes("application/json")) {
+        throw new Error(
+            "The server returned an unexpected response. " +
+                "Please verify you are authenticated and the server is responding correctly.",
+        );
+    }
+
+    return await response.json();
+}
+
+/**
  * Header validation constants and functions
  */
 const HEADER_NAME_REGEX = /^[A-Za-z0-9-]+$/;
@@ -14431,7 +14465,11 @@ async function handleGatewayFormSubmit(e) {
             method: "POST",
             body: formData,
         });
-        const result = await response.json();
+
+        const result = await safeParseJsonResponse(
+            response,
+            "Failed to add gateway",
+        );
 
         if (!result || !result.success) {
             throw new Error(result?.message || "Failed to add gateway");
