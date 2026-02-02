@@ -340,8 +340,11 @@ function escapeHtml(unsafe) {
  * @returns {string} Human-readable error message
  */
 function extractApiError(error, fallback = "An error occurred") {
-    if (!error || !error.detail) {
+    if (!error || (!error.detail && !error.message)) {
         return fallback;
+    }
+    if (error.message) {
+        return error.message;
     }
     if (typeof error.detail === "string") {
         return error.detail;
