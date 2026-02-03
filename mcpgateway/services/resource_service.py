@@ -2242,8 +2242,8 @@ class ResourceService:
                 # ═══════════════════════════════════════════════════════════════════════════
                 # RESOLVE CONTENT: Fetch actual content from gateway if needed
                 # ═══════════════════════════════════════════════════════════════════════════
-                
                 # If content is a Pydantic content model, invoke gateway
+
                 if isinstance(content, (ResourceContent, TextContent)):
                     resource_response = await self.invoke_resource(
                         db=db,
@@ -2255,7 +2255,6 @@ class ResourceService:
                     )
                     if resource_response:
                         setattr(content, "text", resource_response)
-                
                 # If content is any object that quacks like content
                 elif hasattr(content, "text") or hasattr(content, "blob"):
                     if hasattr(content, "blob"):
@@ -2280,7 +2279,6 @@ class ResourceService:
                         )
                         if resource_response:
                             setattr(content, "text", resource_response)
-                
                 # Normalize primitive types to ResourceContent
                 elif isinstance(content, bytes):
                     content = ResourceContent(type="resource", id=str(resource_id), uri=original_uri, blob=content)
@@ -2295,9 +2293,7 @@ class ResourceService:
                 # ═══════════════════════════════════════════════════════════════════════════
                 if has_post_fetch:
                     post_payload = ResourcePostFetchPayload(uri=original_uri, content=content)
-                    post_result, _ = await self._plugin_manager.invoke_hook(
-                        ResourceHookType.RESOURCE_POST_FETCH, post_payload, global_context, contexts, violations_as_exceptions=True
-                    )
+                    post_result, _ = await self._plugin_manager.invoke_hook(ResourceHookType.RESOURCE_POST_FETCH, post_payload, global_context, contexts, violations_as_exceptions=True)
                     if post_result.modified_payload:
                         content = post_result.modified_payload.content
 
