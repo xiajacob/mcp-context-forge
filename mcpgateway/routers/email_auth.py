@@ -708,15 +708,11 @@ async def update_user(user_email: str, user_request: EmailRegistrationRequest, c
         # Update user fields
         user.full_name = user_request.full_name
         requested_is_admin = getattr(user_request, "is_admin", user.is_admin)
-        # Track admin origin when granting or revoking admin
-        if requested_is_admin and not user.is_admin:
-            # Granting admin via API
-            user.is_admin = True
-            user.admin_origin = "api"
-        elif not requested_is_admin and user.is_admin:
-            # Revoking admin via API
-            user.is_admin = False
-            user.admin_origin = None
+        # Track admin origin when granting or revoking admin via API
+        # Only update when status actually changes to preserve original grant source
+        if requested_is_admin != user.is_admin:
+            user.is_admin = requested_is_admin
+            user.admin_origin = "api" if requested_is_admin else None
 
         # Update password if provided
         if user_request.password:
