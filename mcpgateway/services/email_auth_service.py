@@ -1006,13 +1006,23 @@ class EmailAuthService:
             logger.error(f"Error getting auth events: {e}")
             return []
 
-    async def update_user(self, email: str, full_name: Optional[str] = None, is_admin: Optional[bool] = None, password: Optional[str] = None) -> EmailUser:
+    async def update_user(
+        self,
+        email: str,
+        full_name: Optional[str] = None,
+        is_admin: Optional[bool] = None,
+        is_active: Optional[bool] = None,
+        password_change_required: Optional[bool] = None,
+        password: Optional[str] = None,
+    ) -> EmailUser:
         """Update user information.
 
         Args:
             email: User's email address (primary key)
             full_name: New full name (optional)
             is_admin: New admin status (optional)
+            is_active: New active status (optional)
+            password_change_required: Whether user must change password on next login (optional)
             password: New password (optional, will be hashed)
 
         Returns:
@@ -1037,6 +1047,12 @@ class EmailAuthService:
 
             if is_admin is not None:
                 user.is_admin = is_admin
+
+            if is_active is not None:
+                user.is_active = is_active
+
+            if password_change_required is not None:
+                user.password_change_required = password_change_required
 
             if password is not None:
                 if not self.validate_password(password):

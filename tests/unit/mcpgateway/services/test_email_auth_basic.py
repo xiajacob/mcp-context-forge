@@ -555,8 +555,9 @@ class TestEmailAuthServiceUserManagement:
 
                 # Verify user was added with is_active=True
                 mock_db.add.assert_called()
-                added_user = mock_db.add.call_args[0][0]
-                assert added_user.is_active is True
+                # Get the first call to add() which should be the user
+                first_add_call = mock_db.add.call_args_list[0][0][0]
+                assert first_add_call.is_active is True
                 mock_db.commit.assert_called()
 
     @pytest.mark.asyncio
@@ -585,8 +586,9 @@ class TestEmailAuthServiceUserManagement:
 
                 # Verify user was added with is_active=False
                 mock_db.add.assert_called()
-                added_user = mock_db.add.call_args[0][0]
-                assert added_user.is_active is False
+                # Get the first call to add() which should be the user
+                first_add_call = mock_db.add.call_args_list[0][0][0]
+                assert first_add_call.is_active is False
                 mock_db.commit.assert_called()
 
     @pytest.mark.asyncio
@@ -615,8 +617,9 @@ class TestEmailAuthServiceUserManagement:
 
                 # Verify user was added with password_change_required=True
                 mock_db.add.assert_called()
-                added_user = mock_db.add.call_args[0][0]
-                assert added_user.password_change_required is True
+                # Get the first call to add() which should be the user
+                first_add_call = mock_db.add.call_args_list[0][0][0]
+                assert first_add_call.password_change_required is True
                 mock_db.commit.assert_called()
 
     @pytest.mark.asyncio
@@ -645,8 +648,9 @@ class TestEmailAuthServiceUserManagement:
 
                 # Verify user was added with password_change_required=False
                 mock_db.add.assert_called()
-                added_user = mock_db.add.call_args[0][0]
-                assert added_user.password_change_required is False
+                # Get the first call to add() which should be the user
+                first_add_call = mock_db.add.call_args_list[0][0][0]
+                assert first_add_call.password_change_required is False
                 mock_db.commit.assert_called()
 
     @pytest.mark.asyncio
@@ -676,9 +680,10 @@ class TestEmailAuthServiceUserManagement:
 
                 # Verify user was added with both fields set correctly
                 mock_db.add.assert_called()
-                added_user = mock_db.add.call_args[0][0]
-                assert added_user.is_active is False
-                assert added_user.password_change_required is True
+                # Get the first call to add() which should be the user
+                first_add_call = mock_db.add.call_args_list[0][0][0]
+                assert first_add_call.is_active is False
+                assert first_add_call.password_change_required is True
                 mock_db.commit.assert_called()
 
     @pytest.mark.asyncio
