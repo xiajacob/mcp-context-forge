@@ -99,17 +99,15 @@ class TestGrpcEndpoint:
         assert endpoint._channel == mock_channel
 
     @patch("mcpgateway.translate_grpc.grpc")
-    @patch("builtins.open", create=True)
-    async def test_start_secure_channel_with_certs(self, mock_open, mock_grpc, endpoint_with_tls):
+    @patch("pathlib.Path.read_bytes")
+    async def test_start_secure_channel_with_certs(self, mock_read_bytes, mock_grpc, endpoint_with_tls):
         """Test starting endpoint with TLS certificates."""
         mock_channel = MagicMock()
         mock_grpc.secure_channel.return_value = mock_channel
         mock_grpc.ssl_channel_credentials.return_value = MagicMock()
 
-        # Mock file reads for cert and key
-        mock_file = MagicMock()
-        mock_file.read.return_value = b"cert_data"
-        mock_open.return_value.__enter__.return_value = mock_file
+        # Mock Path.read_bytes() for cert and key files
+        mock_read_bytes.return_value = b"cert_data"
 
         with patch.object(endpoint_with_tls, "_discover_services", new_callable=AsyncMock):
             await endpoint_with_tls.start()
