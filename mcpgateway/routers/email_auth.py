@@ -370,12 +370,21 @@ async def register(registration_request: EmailRegistrationRequest, request: Requ
     get_user_agent(request)
 
     try:
-        # Create new user
+        # Validate password is provided for public registration
+        if not registration_request.password:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Password is required for registration"
+            )
+        
+        # Create new user - hardcode security-sensitive fields for public registration
         user = await auth_service.create_user(
             email=registration_request.email,
             password=registration_request.password,
             full_name=registration_request.full_name,
             is_admin=False,  # Regular users cannot self-register as admin
+            is_active=True,  # Public registrations are always active
+            password_change_required=False,  # No forced password change for self-registration
             auth_provider="local",
         )
 
@@ -614,12 +623,21 @@ async def create_user(user_request: EmailRegistrationRequest, current_user_ctx: 
     auth_service = EmailAuthService(db)
 
     try:
-        # Create new user with admin privileges
+        # Validate password is provided
+        if not user_request.password:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Password is required when creating a user"
+            )
+        
+        # Create new user with all fields from request
         user = await auth_service.create_user(
             email=user_request.email,
             password=user_request.password,
             full_name=user_request.full_name,
             is_admin=user_request.is_admin,
+            is_active=user_request.is_active,
+            password_change_required=user_request.password_change_required,
             auth_provider="local",
         )
 
@@ -704,12 +722,18 @@ async def update_user(user_email: str, user_request: EmailRegistrationRequest, c
         if not user:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
-        # Update user fields
-        user.full_name = user_request.full_name
-        user.is_admin = getattr(user_request, "is_admin", user.is_admin)
+        # Update user fields only if provided (partial updates)
+        if user_request.full_name is not None:
+            user.full_name = user_request.full_name
+        if user_request.is_admin is not None:
+            user.is_admin = user_request.is_admin
+        if user_request.is_active is not None:
+            user.is_active = user_request.is_active
+        if user_request.password_change_required is not None:
+            user.password_change_required = user_request.password_change_required
 
         # Update password if provided
-        if user_request.password:
+        if user_request.password is not None:
             # For admin updates, we need to directly update the password hash
             # since we don't have the old password to verify
             # First-Party

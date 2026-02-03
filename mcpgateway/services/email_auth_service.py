@@ -298,7 +298,17 @@ class EmailAuthService:
             logger.error(f"Error getting user by email {email}: {e}")
             return None
 
-    async def create_user(self, email: str, password: str, full_name: Optional[str] = None, is_admin: bool = False, auth_provider: str = "local", skip_password_validation: bool = False) -> EmailUser:
+    async def create_user(
+        self,
+        email: str,
+        password: str,
+        full_name: Optional[str] = None,
+        is_admin: bool = False,
+        is_active: bool = True,
+        password_change_required: bool = False,
+        auth_provider: str = "local",
+        skip_password_validation: bool = False,
+    ) -> EmailUser:
         """Create a new user with email authentication.
 
         Args:
@@ -306,6 +316,8 @@ class EmailAuthService:
             password: Plain text password (will be hashed)
             full_name: Optional full name for display
             is_admin: Whether user has admin privileges
+            is_active: Whether user account is active (default: True)
+            password_change_required: Whether user must change password on next login (default: False)
             auth_provider: Authentication provider ('local', 'github', etc.)
             skip_password_validation: Skip password policy validation (for bootstrap)
 
@@ -321,10 +333,13 @@ class EmailAuthService:
             # user = await service.create_user(
             #     email="new@example.com",
             #     password="secure123",
-            #     full_name="New User"
+            #     full_name="New User",
+            #     is_active=True,
+            #     password_change_required=False
             # )
             # user.email          # Returns: 'new@example.com'
             # user.full_name      # Returns: 'New User'
+            # user.is_active      # Returns: True
         """
         # Normalize email to lowercase
         email = email.lower().strip()
@@ -343,7 +358,16 @@ class EmailAuthService:
         password_hash = await self.password_service.hash_password_async(password)
 
         # Create new user (record password change timestamp)
-        user = EmailUser(email=email, password_hash=password_hash, full_name=full_name, is_admin=is_admin, auth_provider=auth_provider, password_changed_at=utc_now())
+        user = EmailUser(
+            email=email,
+            password_hash=password_hash,
+            full_name=full_name,
+            is_admin=is_admin,
+            is_active=is_active,
+            password_change_required=password_change_required,
+            auth_provider=auth_provider,
+            password_changed_at=utc_now(),
+        )
 
         try:
             self.db.add(user)
