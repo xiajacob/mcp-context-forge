@@ -372,11 +372,8 @@ async def register(registration_request: EmailRegistrationRequest, request: Requ
     try:
         # Validate password is provided for public registration
         if not registration_request.password:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Password is required for registration"
-            )
-        
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Password is required for registration")
+
         # Create new user - hardcode security-sensitive fields for public registration
         user = await auth_service.create_user(
             email=registration_request.email,
@@ -625,11 +622,8 @@ async def create_user(user_request: EmailRegistrationRequest, current_user_ctx: 
     try:
         # Validate password is provided
         if not user_request.password:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Password is required when creating a user"
-            )
-        
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Password is required when creating a user")
+
         # Create new user with all fields from request
         user = await auth_service.create_user(
             email=user_request.email,
