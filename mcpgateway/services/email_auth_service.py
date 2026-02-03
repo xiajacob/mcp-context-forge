@@ -1051,15 +1051,18 @@ class EmailAuthService:
             if is_active is not None:
                 user.is_active = is_active
 
-            if password_change_required is not None:
-                user.password_change_required = password_change_required
-
             if password is not None:
                 if not self.validate_password(password):
                     raise ValueError("Password does not meet security requirements")
                 user.password_hash = await self.password_service.hash_password_async(password)
-                user.password_change_required = False  # Clear password change requirement
+                # Only clear password_change_required if it wasn't explicitly set
+                if password_change_required is None:
+                    user.password_change_required = False
                 user.password_changed_at = utc_now()  # Update password change timestamp
+
+            # Set password_change_required after password processing to allow explicit override
+            if password_change_required is not None:
+                user.password_change_required = password_change_required
 
             user.updated_at = datetime.now(timezone.utc)
 
