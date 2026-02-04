@@ -48,12 +48,22 @@ class TestPermissionServiceCore:
         user_email = "user@example.com"
         permission = "tools.create"
 
+        # Create mock role with permissions
+        mock_role = MagicMock()
+        mock_role.get_effective_permissions.return_value = {permission}
+        mock_role.name = "test_role"
+        mock_role.permissions = [permission]
+
+        mock_user_role = MagicMock()
+        mock_user_role.role = mock_role
+        mock_user_role.role_id = "role-123"
+        mock_user_role.scope = "global"
+
         # Mock dependencies
         with (
             patch.object(permission_service, "_is_user_admin", return_value=False),
-            patch.object(permission_service, "get_user_permissions", return_value={permission}),
+            patch.object(permission_service, "_get_user_roles", return_value=[mock_user_role]),
             patch.object(permission_service, "_log_permission_check") as mock_log,
-            patch.object(permission_service, "_get_roles_for_audit", return_value={"roles": []}),
         ):
             result = await permission_service.check_permission(
                 user_email=user_email, permission=permission, resource_type="tool", resource_id="tool-123", team_id="team-456", ip_address="192.168.1.1", user_agent="Mozilla/5.0"
@@ -81,7 +91,18 @@ class TestPermissionServiceCore:
     @pytest.mark.asyncio
     async def test_check_permission_wildcard(self, permission_service):
         """Test permission check with wildcard permissions."""
-        with patch.object(permission_service, "_is_user_admin", return_value=False), patch.object(permission_service, "get_user_permissions", return_value={Permissions.ALL_PERMISSIONS}):
+        # Create mock role with wildcard permissions
+        mock_role = MagicMock()
+        mock_role.get_effective_permissions.return_value = {Permissions.ALL_PERMISSIONS}
+        mock_role.name = "admin_role"
+        mock_role.permissions = [Permissions.ALL_PERMISSIONS]
+
+        mock_user_role = MagicMock()
+        mock_user_role.role = mock_role
+        mock_user_role.role_id = "role-admin"
+        mock_user_role.scope = "global"
+
+        with patch.object(permission_service, "_is_user_admin", return_value=False), patch.object(permission_service, "_get_user_roles", return_value=[mock_user_role]):
             result = await permission_service.check_permission("user@example.com", "any.permission")
             assert result == True
 
@@ -447,9 +468,20 @@ class TestNoAuditMode:
     @pytest.mark.asyncio
     async def test_check_permission_no_audit(self, permission_service_no_audit):
         """Test permission check without audit logging."""
+        # Create mock role with permissions
+        mock_role = MagicMock()
+        mock_role.get_effective_permissions.return_value = {"tools.read"}
+        mock_role.name = "reader_role"
+        mock_role.permissions = ["tools.read"]
+
+        mock_user_role = MagicMock()
+        mock_user_role.role = mock_role
+        mock_user_role.role_id = "role-reader"
+        mock_user_role.scope = "global"
+
         with (
             patch.object(permission_service_no_audit, "_is_user_admin", return_value=False),
-            patch.object(permission_service_no_audit, "get_user_permissions", return_value={"tools.read"}),
+            patch.object(permission_service_no_audit, "_get_user_roles", return_value=[mock_user_role]),
             patch.object(permission_service_no_audit, "_log_permission_check") as mock_log,
         ):
             result = await permission_service_no_audit.check_permission("user@example.com", "tools.read")

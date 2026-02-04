@@ -98,8 +98,19 @@ class TestPermissionFallback:
     @pytest.mark.asyncio
     async def test_explicit_rbac_permissions_override_fallback(self, permission_service):
         """Test that explicit RBAC permissions override fallback logic."""
+        # Create mock role with explicit RBAC permission
+        mock_role = MagicMock()
+        mock_role.get_effective_permissions.return_value = {"teams.manage_members"}
+        mock_role.name = "team_manager"
+        mock_role.permissions = ["teams.manage_members"]
+
+        mock_user_role = MagicMock()
+        mock_user_role.role = mock_role
+        mock_user_role.role_id = "role-team-manager"
+        mock_user_role.scope = "team"
+
         # User has explicit RBAC permission
-        with patch.object(permission_service, "_is_user_admin", return_value=False), patch.object(permission_service, "get_user_permissions", return_value={"teams.manage_members"}):
+        with patch.object(permission_service, "_is_user_admin", return_value=False), patch.object(permission_service, "_get_user_roles", return_value=[mock_user_role]):
             # Should get permission from RBAC, not fallback
             assert await permission_service.check_permission("rbac_user@example.com", "teams.manage_members", team_id="team-123") == True
 
