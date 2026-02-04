@@ -55,8 +55,7 @@ class TestPermissionFallback:
         """Test that team owners have full permissions on their teams."""
         with (
             patch.object(permission_service, "_is_user_admin", return_value=False),
-            patch.object(permission_service, "get_user_permissions", return_value=set()),
-            patch.object(permission_service, "_is_team_member", return_value=True),
+            patch.object(permission_service, "_get_user_roles", return_value=[]),
             patch.object(permission_service, "_get_user_team_role", return_value="owner"),
         ):
             # Team owner should have full permissions on their team
@@ -70,8 +69,7 @@ class TestPermissionFallback:
         """Test that team members have read permissions on their teams."""
         with (
             patch.object(permission_service, "_is_user_admin", return_value=False),
-            patch.object(permission_service, "get_user_permissions", return_value=set()),
-            patch.object(permission_service, "_is_team_member", return_value=True),
+            patch.object(permission_service, "_get_user_roles", return_value=[]),
             patch.object(permission_service, "_get_user_team_role", return_value="member"),
         ):
             # Team member should have read permissions
@@ -87,8 +85,8 @@ class TestPermissionFallback:
         """Test that non-team members are denied team-specific permissions."""
         with (
             patch.object(permission_service, "_is_user_admin", return_value=False),
-            patch.object(permission_service, "get_user_permissions", return_value=set()),
-            patch.object(permission_service, "_is_team_member", return_value=False),
+            patch.object(permission_service, "_get_user_roles", return_value=[]),
+            patch.object(permission_service, "_get_user_team_role", return_value=None),
         ):
             # Non-member should be denied all team-specific permissions
             assert await permission_service.check_permission("outsider@example.com", "teams.read", team_id="team-123") == False
