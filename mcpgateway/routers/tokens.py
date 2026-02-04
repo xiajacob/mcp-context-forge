@@ -160,6 +160,7 @@ async def create_token(
             tags=request.tags,
             team_id=request.team_id,
             caller_permissions=caller_permissions,
+            is_active=request.is_active,
         )
 
         # Create TokenResponse for the token info
@@ -181,6 +182,8 @@ async def create_token(
             tags=token_record.tags or [],
         )
 
+        db.commit()
+        db.close()
         return TokenCreateResponse(
             token=token_response,
             access_token=raw_token,
@@ -254,6 +257,8 @@ async def list_tokens(
             )
         )
 
+    db.commit()
+    db.close()
     return TokenListResponse(tokens=token_responses, total=len(token_responses), limit=limit, offset=offset)
 
 
@@ -290,6 +295,8 @@ async def get_token(
     if not token:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Token not found")
 
+    db.commit()
+    db.close()
     return TokenResponse(
         id=token.id,
         name=token.name,
@@ -365,12 +372,13 @@ async def update_token(
             scope=scope,
             tags=request.tags,
             caller_permissions=caller_permissions,
+            is_active=request.is_active,
         )
 
         if not token:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Token not found")
 
-        return TokenResponse(
+        result = TokenResponse(
             id=token.id,
             name=token.name,
             description=token.description,
@@ -387,6 +395,9 @@ async def update_token(
             time_restrictions=token.time_restrictions,
             usage_limits=token.usage_limits,
         )
+        db.commit()
+        db.close()
+        return result
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
@@ -426,6 +437,9 @@ async def revoke_token(
     if not success:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Token not found")
 
+    db.commit()
+    db.close()
+
 
 @router.get("/{token_id}/usage", response_model=TokenUsageStatsResponse)
 @require_permission("tokens.read")
@@ -460,6 +474,8 @@ async def get_token_usage_stats(
 
     stats = await service.get_token_usage_stats(user_email=current_user["email"], token_id=token_id, days=days)
 
+    db.commit()
+    db.close()
     return TokenUsageStatsResponse(**stats)
 
 
@@ -538,6 +554,8 @@ async def list_all_tokens(
             )
         )
 
+    db.commit()
+    db.close()
     return TokenListResponse(tokens=token_responses, total=len(token_responses), limit=limit, offset=offset)
 
 
@@ -577,6 +595,9 @@ async def admin_revoke_token(
 
     if not success:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Token not found")
+
+    db.commit()
+    db.close()
 
 
 # Team-based token endpoints
@@ -632,6 +653,7 @@ async def create_team_token(
             tags=request.tags,
             team_id=team_id,  # This will validate team ownership
             caller_permissions=caller_permissions,
+            is_active=request.is_active,
         )
 
         # Create TokenResponse for the token info
@@ -653,6 +675,8 @@ async def create_team_token(
             tags=token_record.tags or [],
         )
 
+        db.commit()
+        db.close()
         return TokenCreateResponse(
             token=token_response,
             access_token=raw_token,
@@ -729,6 +753,8 @@ async def list_team_tokens(
                 )
             )
 
+        db.commit()
+        db.close()
         return TokenListResponse(tokens=token_responses, total=len(token_responses), limit=limit, offset=offset)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))

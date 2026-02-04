@@ -429,7 +429,9 @@ class ToolCreate(BaseModel):
         if v is None:
             return v
 
-        forbidden_patterns = ["&&", ";", "||", "$(", "`", "|", "> ", "< "]
+        # Note: backticks (`) are allowed as they are commonly used in Markdown
+        # for inline code examples in tool descriptions
+        forbidden_patterns = ["&&", ";", "||", "$(", "|", "> ", "< "]
         for pat in forbidden_patterns:
             if pat in v:
                 raise ValueError(f"Description contains unsafe characters: '{pat}'")
@@ -1537,6 +1539,7 @@ class ResourceCreate(BaseModel):
     team_id: Optional[str] = Field(None, description="Team ID for resource organization")
     owner_email: Optional[str] = Field(None, description="Email of the resource owner")
     visibility: Optional[str] = Field(default="public", description="Visibility level (private, team, public)")
+    gateway_id: Optional[str] = Field(None, description="ID of the gateway for the resource")
 
     @field_validator("tags")
     @classmethod
@@ -1812,7 +1815,7 @@ class ResourceRead(BaseModelWithConfigDict):
     updated_at: datetime
     enabled: bool
     metrics: Optional[ResourceMetrics] = Field(None, description="Resource metrics (may be None in list operations)")
-    tags: List[Dict[str, str]] = Field(default_factory=list, description="Tags for categorizing the resource")
+    tags: List[str] = Field(default_factory=list, description="Tags for categorizing the resource")
 
     # Comprehensive metadata for audit tracking
     created_by: Optional[str] = Field(None, description="Username who created this entity")
@@ -2077,6 +2080,7 @@ class PromptCreate(BaseModelWithConfigDict):
     team_id: Optional[str] = Field(None, description="Team ID for resource organization")
     owner_email: Optional[str] = Field(None, description="Email of the prompt owner")
     visibility: Optional[str] = Field(default="public", description="Visibility level (private, team, public)")
+    gateway_id: Optional[str] = Field(None, description="ID of the gateway for the prompt")
 
     @field_validator("tags")
     @classmethod
@@ -3388,10 +3392,11 @@ class GatewayRead(BaseModelWithConfigDict):
                 for header in masked_data["auth_headers"]
             ]
 
-        masked_data["auth_password_unmasked"] = self.auth_password_unmasked
-        masked_data["auth_token_unmasked"] = self.auth_token_unmasked
-        masked_data["auth_header_value_unmasked"] = self.auth_header_value_unmasked
-        masked_data["auth_headers_unmasked"] = [header.copy() for header in self.auth_headers_unmasked] if self.auth_headers_unmasked else None
+        # SECURITY: Never expose unmasked credentials in API responses
+        masked_data["auth_password_unmasked"] = None
+        masked_data["auth_token_unmasked"] = None
+        masked_data["auth_header_value_unmasked"] = None
+        masked_data["auth_headers_unmasked"] = None
         return GatewayRead.model_validate(masked_data)
 
 
@@ -6159,6 +6164,7 @@ class TokenCreateRequest(BaseModel):
         expires_in_days: Optional expiry in days
         scope: Optional token scoping configuration
         tags: Optional organizational tags
+        is_active: Token active status (defaults to True)
 
     Examples:
         >>> request = TokenCreateRequest(
@@ -6177,6 +6183,7 @@ class TokenCreateRequest(BaseModel):
     scope: Optional[TokenScopeRequest] = Field(None, description="Token scoping configuration")
     tags: List[str] = Field(default_factory=list, description="Organizational tags")
     team_id: Optional[str] = Field(None, description="Team ID for team-scoped tokens")
+    is_active: bool = Field(default=True, description="Token active status")
 
 
 class TokenUpdateRequest(BaseModel):
@@ -6187,6 +6194,7 @@ class TokenUpdateRequest(BaseModel):
         description: New token description
         scope: New token scoping configuration
         tags: New organizational tags
+        is_active: New token active status
 
     Examples:
         >>> request = TokenUpdateRequest(
@@ -6201,6 +6209,7 @@ class TokenUpdateRequest(BaseModel):
     description: Optional[str] = Field(None, description="New token description", max_length=1000)
     scope: Optional[TokenScopeRequest] = Field(None, description="New token scoping configuration")
     tags: Optional[List[str]] = Field(None, description="New organizational tags")
+    is_active: Optional[bool] = Field(None, description="New token active status")
 
 
 class TokenResponse(BaseModel):

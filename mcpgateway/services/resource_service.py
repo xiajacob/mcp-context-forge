@@ -331,7 +331,21 @@ class ResourceService:
         else:
             resource_dict["metrics"] = None
 
-        resource_dict["tags"] = resource.tags or []
+        raw_tags = resource.tags or []
+        normalized_tags = []
+        for tag in raw_tags:
+            if isinstance(tag, str):
+                normalized_tags.append(tag)
+                continue
+            if isinstance(tag, dict):
+                label = tag.get("label") or tag.get("name")
+                if label:
+                    normalized_tags.append(label)
+                continue
+            label = getattr(tag, "label", None) or getattr(tag, "name", None)
+            if label:
+                normalized_tags.append(label)
+        resource_dict["tags"] = normalized_tags
         resource_dict["team"] = getattr(resource, "team", None)
 
         # Include metadata fields for proper API response
@@ -415,16 +429,22 @@ class ResourceService:
         """
         try:
             logger.info(f"Registering resource: {resource.uri}")
+
+            # Extract gateway_id from resource if present
+            gateway_id = getattr(resource, "gateway_id", None)
+
             # Check for existing server with the same uri
             if visibility.lower() == "public":
                 logger.info(f"visibility:: {visibility}")
-                # Check for existing public resource with the same uri
-                existing_resource = db.execute(select(DbResource).where(DbResource.uri == resource.uri, DbResource.visibility == "public")).scalar_one_or_none()
+                # Check for existing public resource with the same uri and gateway_id
+                existing_resource = db.execute(select(DbResource).where(DbResource.uri == resource.uri, DbResource.visibility == "public", DbResource.gateway_id == gateway_id)).scalar_one_or_none()
                 if existing_resource:
                     raise ResourceURIConflictError(resource.uri, enabled=existing_resource.enabled, resource_id=existing_resource.id, visibility=existing_resource.visibility)
             elif visibility.lower() == "team" and team_id:
-                # Check for existing team resource with the same uri
-                existing_resource = db.execute(select(DbResource).where(DbResource.uri == resource.uri, DbResource.visibility == "team", DbResource.team_id == team_id)).scalar_one_or_none()
+                # Check for existing team resource with the same uri and gateway_id
+                existing_resource = db.execute(
+                    select(DbResource).where(DbResource.uri == resource.uri, DbResource.visibility == "team", DbResource.team_id == team_id, DbResource.gateway_id == gateway_id)
+                ).scalar_one_or_none()
                 if existing_resource:
                     raise ResourceURIConflictError(resource.uri, enabled=existing_resource.enabled, resource_id=existing_resource.id, visibility=existing_resource.visibility)
 
@@ -459,6 +479,7 @@ class ResourceService:
                 owner_email=getattr(resource, "owner_email", None) or owner_email or created_by,
                 # Endpoint visibility parameter takes precedence over schema default
                 visibility=visibility if visibility is not None else getattr(resource, "visibility", "public"),
+                gateway_id=gateway_id,
             )
 
             # Add to DB
@@ -648,16 +669,19 @@ class ResourceService:
                 # Batch check for existing resources to detect conflicts
                 resource_uris = [resource.uri for resource in chunk]
 
+                # Build base query conditions
                 if visibility.lower() == "public":
-                    existing_resources_query = select(DbResource).where(DbResource.uri.in_(resource_uris), DbResource.visibility == "public")
+                    base_conditions = [DbResource.uri.in_(resource_uris), DbResource.visibility == "public"]
                 elif visibility.lower() == "team" and team_id:
-                    existing_resources_query = select(DbResource).where(DbResource.uri.in_(resource_uris), DbResource.visibility == "team", DbResource.team_id == team_id)
+                    base_conditions = [DbResource.uri.in_(resource_uris), DbResource.visibility == "team", DbResource.team_id == team_id]
                 else:
                     # Private resources - check by owner
-                    existing_resources_query = select(DbResource).where(DbResource.uri.in_(resource_uris), DbResource.visibility == "private", DbResource.owner_email == (owner_email or created_by))
+                    base_conditions = [DbResource.uri.in_(resource_uris), DbResource.visibility == "private", DbResource.owner_email == (owner_email or created_by)]
 
+                existing_resources_query = select(DbResource).where(*base_conditions)
                 existing_resources = db.execute(existing_resources_query).scalars().all()
-                existing_resources_map = {resource.uri: resource for resource in existing_resources}
+                # Use (uri, gateway_id) tuple as key for proper conflict detection with gateway_id scoping
+                existing_resources_map = {(r.uri, r.gateway_id): r for r in existing_resources}
 
                 resources_to_add = []
                 resources_to_update = []
@@ -668,8 +692,10 @@ class ResourceService:
                         resource_team_id = team_id if team_id is not None else getattr(resource, "team_id", None)
                         resource_owner_email = owner_email or getattr(resource, "owner_email", None) or created_by
                         resource_visibility = visibility if visibility is not None else getattr(resource, "visibility", "public")
+                        resource_gateway_id = getattr(resource, "gateway_id", None)
 
-                        existing_resource = existing_resources_map.get(resource.uri)
+                        # Look up existing resource by (uri, gateway_id) tuple
+                        existing_resource = existing_resources_map.get((resource.uri, resource_gateway_id))
 
                         if existing_resource:
                             # Handle conflict based on strategy
@@ -1504,6 +1530,10 @@ class ResourceService:
         resource_info = None
         resource_info = db.execute(select(DbResource).where(DbResource.id == resource_id)).scalar_one_or_none()
 
+        # Release transaction immediately after resource lookup to prevent idle-in-transaction
+        # This is especially important when resource isn't found - we don't want to hold the transaction
+        db.commit()
+
         # Normalize user_identity to string for session pool isolation
         # Use authenticated user for pool isolation, but keep platform_admin for OAuth token lookup
         if isinstance(user_identity, dict):
@@ -1519,8 +1549,18 @@ class ResourceService:
         if resource_info:
             gateway_id = getattr(resource_info, "gateway_id", None)
             resource_name = getattr(resource_info, "name", None)
+            gateway = None
             if gateway_id:
                 gateway = db.execute(select(DbGateway).where(DbGateway.id == gateway_id)).scalar_one_or_none()
+
+            # ═══════════════════════════════════════════════════════════════════════════
+            # CRITICAL: Release DB transaction immediately after fetching resource/gateway
+            # This ensures the transaction doesn't stay open if there's no gateway
+            # or if the function returns early for any reason.
+            # ═══════════════════════════════════════════════════════════════════════════
+            db.commit()
+
+            if gateway:
 
                 start_time = time.monotonic()
                 success = False
@@ -1606,67 +1646,17 @@ class ResourceService:
                         )
 
                     try:
-                        # Handle different authentication types
-                        headers = {}
-                        if gateway and gateway.auth_type == "oauth" and gateway.oauth_config:
-                            grant_type = gateway.oauth_config.get("grant_type", "client_credentials")
-
-                            if grant_type == "authorization_code":
-                                # For Authorization Code flow, try to get stored tokens
-                                try:
-                                    # First-Party
-                                    from mcpgateway.services.token_storage_service import TokenStorageService  # pylint: disable=import-outside-toplevel
-
-                                    token_storage = TokenStorageService(db)
-                                    # Get user-specific OAuth token
-                                    # if not user_email:
-                                    #     if span:
-                                    #         span.set_attribute("health.status", "unhealthy")
-                                    #         span.set_attribute("error.message", "User email required for OAuth token")
-                                    #     await self._handle_gateway_failure(gateway)
-
-                                    access_token: str = await token_storage.get_user_token(gateway.id, oauth_user_email)
-
-                                    if access_token:
-                                        headers["Authorization"] = f"Bearer {access_token}"
-                                    else:
-                                        if span:
-                                            span.set_attribute("health.status", "unhealthy")
-                                            span.set_attribute("error.message", "No valid OAuth token for user")
-                                        # await self._handle_gateway_failure(gateway)
-
-                                except Exception as e:
-                                    logger.error(f"Failed to obtain stored OAuth token for gateway {gateway.name}: {e}")
-                                    if span:
-                                        span.set_attribute("health.status", "unhealthy")
-                                        span.set_attribute("error.message", "Failed to obtain stored OAuth token")
-                                    # await self._handle_gateway_failure(gateway)
-                            else:
-                                # For Client Credentials flow, get token directly
-                                try:
-                                    access_token: str = await self.oauth_manager.get_access_token(gateway.oauth_config)
-                                    headers["Authorization"] = f"Bearer {access_token}"
-                                except Exception as e:
-                                    if span:
-                                        span.set_attribute("health.status", "unhealthy")
-                                        span.set_attribute("error.message", str(e))
-                                    # await self._handle_gateway_failure(gateway)
-                        else:
-                            # Handle non-OAuth authentication (existing logic)
-                            auth_data = gateway.auth_value or {}
-                            if isinstance(auth_data, str):
-                                headers = decode_auth(auth_data)
-                            elif isinstance(auth_data, dict):
-                                headers = {str(k): str(v) for k, v in auth_data.items()}
-                            else:
-                                headers = {}
-
                         # ═══════════════════════════════════════════════════════════════════════════
-                        # Extract gateway data to local variables BEFORE releasing DB connection
+                        # Extract gateway data to local variables BEFORE OAuth handling
+                        # OAuth client_credentials flow makes network calls, so we must release
+                        # the DB transaction first to prevent idle-in-transaction during network I/O
                         # ═══════════════════════════════════════════════════════════════════════════
                         gateway_url = gateway.url
                         gateway_transport = gateway.transport
                         gateway_auth_type = gateway.auth_type
+                        gateway_auth_value = gateway.auth_value
+                        gateway_oauth_config = gateway.oauth_config
+                        gateway_name = gateway.name
                         gateway_auth_query_params = getattr(gateway, "auth_query_params", None)
 
                         # Apply query param auth to URL if applicable
@@ -1685,13 +1675,60 @@ class ResourceService:
                                 gateway_url = apply_query_param_auth(gateway_url, auth_query_params_decrypted)
 
                         # ═══════════════════════════════════════════════════════════════════════════
-                        # CRITICAL: Release DB connection back to pool BEFORE making HTTP calls
+                        # CRITICAL: Release DB connection back to pool BEFORE making HTTP/OAuth calls
                         # This prevents connection pool exhaustion during slow upstream requests.
+                        # OAuth client_credentials flow makes network calls to token endpoints.
                         # All needed data has been extracted to local variables above.
-                        # The session will be closed again by FastAPI's get_db() finally block (safe no-op).
                         # ═══════════════════════════════════════════════════════════════════════════
-                        db.commit()  # End read-only transaction cleanly (commit not rollback to avoid inflating rollback stats)
+                        db.commit()  # End read-only transaction cleanly
                         db.close()
+
+                        # Handle different authentication types (AFTER DB release)
+                        headers = {}
+                        if gateway_auth_type == "oauth" and gateway_oauth_config:
+                            grant_type = gateway_oauth_config.get("grant_type", "client_credentials")
+
+                            if grant_type == "authorization_code":
+                                # For Authorization Code flow, try to get stored tokens
+                                try:
+                                    # First-Party
+                                    from mcpgateway.services.token_storage_service import TokenStorageService  # pylint: disable=import-outside-toplevel
+
+                                    # Use fresh DB session for token lookup (original db was closed)
+                                    with fresh_db_session() as token_db:
+                                        token_storage = TokenStorageService(token_db)
+                                        access_token: str = await token_storage.get_user_token(gateway_id, oauth_user_email)
+
+                                    if access_token:
+                                        headers["Authorization"] = f"Bearer {access_token}"
+                                    else:
+                                        if span:
+                                            span.set_attribute("health.status", "unhealthy")
+                                            span.set_attribute("error.message", "No valid OAuth token for user")
+
+                                except Exception as e:
+                                    logger.error(f"Failed to obtain stored OAuth token for gateway {gateway_name}: {e}")
+                                    if span:
+                                        span.set_attribute("health.status", "unhealthy")
+                                        span.set_attribute("error.message", "Failed to obtain stored OAuth token")
+                            else:
+                                # For Client Credentials flow, get token directly (makes network calls)
+                                try:
+                                    access_token: str = await self.oauth_manager.get_access_token(gateway_oauth_config)
+                                    headers["Authorization"] = f"Bearer {access_token}"
+                                except Exception as e:
+                                    if span:
+                                        span.set_attribute("health.status", "unhealthy")
+                                        span.set_attribute("error.message", str(e))
+                        else:
+                            # Handle non-OAuth authentication (existing logic)
+                            auth_data = gateway_auth_value or {}
+                            if isinstance(auth_data, str):
+                                headers = decode_auth(auth_data)
+                            elif isinstance(auth_data, dict):
+                                headers = {str(k): str(v) for k, v in auth_data.items()}
+                            else:
+                                headers = {}
 
                         async def connect_to_sse_session(server_url: str, uri: str, authentication: Optional[Dict[str, str]] = None) -> str | None:
                             """
@@ -2190,6 +2227,9 @@ class ResourceService:
                         if not server_match:
                             raise ResourceNotFoundError(f"Resource not found: {resource_uri or resource_id}")
 
+                # Release transaction before network calls to avoid idle-in-transaction during invoke_resource
+                db.commit()
+
                 # Call post-fetch hooks if registered
                 if has_post_fetch:
                     # Create post-fetch payload
@@ -2281,14 +2321,16 @@ class ResourceService:
                         logger.warning(f"Failed to record resource metric: {metrics_error}")
 
                 # End database span for observability dashboard
+                # NOTE: Use fresh_db_session() since db may have been closed by invoke_resource
                 if db_span_id and observability_service and not db_span_ended:
                     try:
-                        observability_service.end_span(
-                            db=db,
-                            span_id=db_span_id,
-                            status="ok" if success else "error",
-                            status_message=error_message if error_message else None,
-                        )
+                        with fresh_db_session() as fresh_db:
+                            observability_service.end_span(
+                                db=fresh_db,
+                                span_id=db_span_id,
+                                status="ok" if success else "error",
+                                status_message=error_message if error_message else None,
+                            )
                         db_span_ended = True
                         logger.debug(f"✓ Ended resource.read span: {db_span_id}")
                     except Exception as e:
@@ -3325,7 +3367,6 @@ class ResourceService:
             "data": {
                 "id": resource.id,
                 "uri": resource.uri,
-                "content": resource.content,
                 "enabled": resource.enabled,
             },
             "timestamp": datetime.now(timezone.utc).isoformat(),
