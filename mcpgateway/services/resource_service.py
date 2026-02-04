@@ -2239,6 +2239,9 @@ class ResourceService:
                 # Prefer returning first-class content models or objects with content-like attributes.
                 # ResourceContent and TextContent already imported at top level
 
+                # Release transaction before network calls to avoid idle-in-transaction during invoke_resource
+                db.commit()
+
                 # ═══════════════════════════════════════════════════════════════════════════
                 # RESOLVE CONTENT: Fetch actual content from gateway if needed
                 # ═══════════════════════════════════════════════════════════════════════════
